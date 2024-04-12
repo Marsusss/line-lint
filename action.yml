@@ -1,0 +1,60 @@
+name: 'line-lint'
+description: 'Make sure the last line of each file is empty'
+inputs:
+  directories_to_exclude:
+    description: 'directories to exclude from search'
+    required: false
+    default: '' #'.git'
+  directory_to_search:
+    description: 'directory to search'
+    required: false
+    default: '.'
+  extensions_to_include:
+    description: 'extensions to include in search, mutually exclusive with extensions_to_exclude'
+    required: false
+    default: ''
+  extensions_to_exclude:
+    description: 'extensions to exclude from search, mutually exclusive with extensions_to_include'
+    required: false
+    default: ''
+runs:
+  using: 'composite'
+  steps:
+    - name: line-lint
+      id: line-lint
+      shell: bash
+      run: |
+        if [[ -n "${{ inputs.extensions_to_include }}" && -n "${{ inputs.extensions_to_exclude }}" ]]; then
+          echo "::warning title=Mutually exclusive inputs::Both 'extensions_to_include' and 'extensions_to_exclude' are defined. Only 'extensions_to_include' will be used."
+        fi
+
+        IFS=' ' read -r -a directories <<< "${{ inputs.directories_to_exclude }}"
+        prune_conditions=""
+        for dir in "${directories[@]}"; do
+          prune_conditions="$prune_conditions -o -name $dir"
+        done
+
+        prune_conditions=${prune_conditions# -o }
+        
+        files=$(find ${{ inputs.directory_to_search }} -type d \( $prune_conditions \) -prune -o -type f -print)
+
+        error=0
+        
+        IFS=' ' read -r -a exclude <<< "${{ inputs.extensions_to_exclude }}"
+        IFS=' ' read -r -a include <<< "${{ inputs.extensions_to_include }}"
+        
+        for file in $files; do
+          ext="${file##*.}"
+          if [[ " ${include[@]} " =~ " ${ext} " ]] || [[ ! " ${exclude[@]} " =~ " ${ext} " && -z "${{ inputs.extensions_to_include }}" ]] || [[ -z "${{ inputs.extensions_to_include }}" && -z "${{ inputs.extensions_to_exclude }}" ]]; then
+            if [ $(tail -c1 "$file") ]; then
+              echo "No newline at end of $file"
+              error=1
+            fi
+          fi
+        done
+        
+        if [ $error -eq 1 ]; then
+          echo "::error title=Missing newlines::Some files have no newline at the end"
+        fi
+        
+        exit $error
